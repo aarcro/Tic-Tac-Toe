@@ -2,10 +2,6 @@
 
 import curses
 import random
-import time
-
-from gettext import gettext
-from pprint import pprint as pp
 
 
 class SpaceOccupied(Exception):
@@ -21,25 +17,65 @@ class Game(object):
         self.window = window
         self.turns = turn_alternator()
         self.current_turn = self.turns.next()
-        self.state = (
+        self.rows = (
             [0, 0, 0],
             [0, 0, 0],
             [0, 0, 0])
 
     def __iter__(self):
-        for row in self.state:
+        for row in self.rows:
             yield row
 
     def play(self, y, x):
-        if self.state[y][x] == 0:
-            self.state[y][x] = self.current_turn
+        """Record a move for the current player.
+            Returns True if the game is over, and does not change player
+            Returns False if the game continues and changes to next player
+        """
+
+        if self.rows[y][x] == 0:
+            self.rows[y][x] = self.current_turn
         else:
             raise SpaceOccupied()
 
-        # TODO Check for winner
+        # Check Lines
+        for line in self.lines:
+            # Only the current player can win
+            if sum(line) == (3 * self.current_turn):
+                return True
 
         self.current_turn = self.turns.next()
         self.display_state()
+        return False
+
+    @property
+    def lines(self):
+        for row in self.rows:
+            yield row
+
+        for col in self.columns:
+            yield col
+
+        yield self.left_diagonal
+        yield self.right_diagonal
+
+    @property
+    def columns(self):
+        result = []
+        for idx in xrange(3):
+            result.append([r[idx] for r in self.rows])
+        return result
+
+    @property
+    def left_diagonal(self):
+        return (self.rows[0][0],
+            self.rows[1][1],
+            self.rows[2][2])
+
+    @property
+    def right_diagonal(self):
+        return (self.rows[0][2],
+            self.rows[1][1],
+            self.rows[2][0])
 
     def display_state(self):
         """Redraw everything good for staring a game
@@ -47,7 +83,7 @@ class Game(object):
 
         self.draw_board()
 
-        for y, row in enumerate(self.state):
+        for y, row in enumerate(self.rows):
             self.window.addstr(15 + y, 0, str(row))
             for x, val in enumerate(row):
                 if val == 1:
@@ -120,7 +156,7 @@ class RandomPlayer(Player):
         if not open_list:
             self.game.show_message('The board is full')
             return
-        self.game.play(*random.choice(open_list))
+        return self.game.play(*random.choice(open_list))
 
 
 def main(stdscr):
@@ -145,10 +181,18 @@ def main(stdscr):
 
     cpu = RandomPlayer(game)
 
-    for t in xrange(10):
-        cpu.play()
+    for t in xrange(9):
+        if cpu.play():
+            if game.current_turn == 1:
+                game.show_message("X wins")
+            else:
+                game.show_message("O wins")
+            break
+
         game.show_message("Next?")
         stdscr.getch()
+
+    stdscr.getch()
 
 
 if __name__ == '__main__':
