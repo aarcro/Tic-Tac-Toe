@@ -36,10 +36,12 @@ class Game(object):
         for y, row in enumerate(self.state):
             for x, col in enumerate(row):
                 if col == 1:
-                    self.draw_x(y, x) 
+                    self.draw_x(y, x)
                 if col == 10:
                     self.draw_o(y, x)
-                
+
+        self.window.refresh()
+
     def draw_x(self, y, x):
         y_loc = (y * 4) + 2
         x_loc = (y * 4) + 1
@@ -49,6 +51,17 @@ class Game(object):
         y_loc = (y * 4) + 2
         x_loc = (y * 4) + 1
         self.window.addstr(y_loc, x_loc, 'O')
+
+    def key_prompt(self, prompt):
+        self.show_message(prompt)
+        ch = self.window.getkey()
+        self.window.erase()
+        self.display_state()
+
+        return ch
+
+    def show_message(self, msg):
+        self.window.addstr(13, 0, msg)
 
 
 class PerfectPlayer(object):
@@ -71,15 +84,20 @@ def main(stdscr):
     game = Game(stdscr)
     game.display_state()
 
-    c = stdscr.getch()
-    #user_first = None
-    #while user_first is None:
-    #    user_first = raw_input('Would you like to user_first first (y/n)? ').lower()[0]
-    #    if user_first not in 'yn':
-    #        print 'Excuse me?'
-    #        user_first = None
+    user_first = None
+    while user_first is None:
+        user_first = game.key_prompt('Would you like to play first (y/n)? ')
+        if user_first not in 'yn':
+            user_first = None
 
-    #user_first = user_first == 'y'
+    user_first = user_first == 'y'
+
+    if user_first:
+        game.show_message('Ok, choose your square')
+    else:
+        game.show_message("Ok, I'll go first")
+
+    stdscr.getch()
 
     #cpu = PerfectPlayer(play_first=not user_first)
 
