@@ -3,6 +3,8 @@
 import curses
 import random
 
+LEFT_DIAGONAL = ((0, 0), (1, 1), (2, 2))
+RIGHT_DIAGONAL = ((0, 2), (1, 1), (2, 0))
 
 class SpaceOccupied(Exception):
     pass
@@ -23,8 +25,8 @@ class Game(object):
             [0, 0, 0])
 
     def __iter__(self):
-        for row in self.rows:
-            yield row
+        for values, spaces in self.lines:
+            yield values, spaces
 
     def play(self, y, x):
         """Record a move for the current player.
@@ -40,9 +42,9 @@ class Game(object):
         self.display_state()
 
         # Check Lines
-        for line in self.lines:
+        for values, spaces in self.lines:
             # Only the current player can win
-            if sum(line) == (3 * self.current_turn):
+            if sum(values) == (3 * self.current_turn):
                 return True
 
         self.current_turn = self.turns.next()
@@ -50,14 +52,24 @@ class Game(object):
 
     @property
     def lines(self):
-        for row in self.rows:
-            yield row
+        """Generate tuples of (values, spaces)
+        values is a three item list, each item is:
+             0 - Unoccupied
+             1 - X player
+            10 - O player
 
-        for col in self.columns:
-            yield col
+        spaces is a three item list, of (y,x) cordinates specifying the location
+            of each value
+        """
 
-        yield self.left_diagonal
-        yield self.right_diagonal
+        for y, row in enumerate(self.rows):
+            yield row, [(y, x) for x in xrange(3)]
+
+        for x, col in enumerate(self.columns):
+            yield col, [(y, x) for y in xrange(3)]
+
+        yield self.left_diagonal, LEFT_DIAGONAL
+        yield self.right_diagonal, RIGHT_DIAGONAL
 
     @property
     def columns(self):
@@ -68,15 +80,11 @@ class Game(object):
 
     @property
     def left_diagonal(self):
-        return (self.rows[0][0],
-            self.rows[1][1],
-            self.rows[2][2])
+        return [self.rows[y][x] for y,x in LEFT_DIAGONAL]
 
     @property
     def right_diagonal(self):
-        return (self.rows[0][2],
-            self.rows[1][1],
-            self.rows[2][0])
+        return [self.rows[y][x] for y,x in RIGHT_DIAGONAL]
 
     def display_state(self):
         """Redraw everything good for staring a game
@@ -179,7 +187,7 @@ class RandomPlayer(Player):
         self.game.display_state()
         self.game.key_prompt('Ready?')
 
-        open_list = [(y, x) for y, row in enumerate(self.game) for x, val in enumerate(row) if val == 0]
+        open_list = [(y, x) for y, row in enumerate(self.game.rows) for x, val in enumerate(row) if val == 0]
         if not open_list:
             self.display_state()
             self.game.show_message('The board is full')
