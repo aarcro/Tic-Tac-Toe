@@ -1,17 +1,61 @@
 #!/usr/bin/env python
 
 import curses
+import random
+import time
 
 from gettext import gettext
+from pprint import pprint as pp
 
+
+class SpaceOccupied(Exception):
+    pass
+
+def turn_alternator():
+    while 1:
+        yield 1
+        yield 10
 
 class Game(object):
     def __init__(self, window):
         self.window = window
-        self.state = [
+        self.turns = turn_alternator()
+        self.current_turn = self.turns.next()
+        self.state = (
             [0, 0, 0],
             [0, 0, 0],
-            [0, 0, 0]]
+            [0, 0, 0])
+
+    def __iter__(self):
+        for row in self.state:
+            yield row
+
+    def play(self, y, x):
+        if self.state[y][x] == 0:
+            self.state[y][x] = self.current_turn
+        else:
+            raise SpaceOccupied()
+
+        # TODO Check for winner
+
+        self.current_turn = self.turns.next()
+        self.display_state()
+
+    def display_state(self):
+        """Redraw everything good for staring a game
+        """
+
+        self.draw_board()
+
+        for y, row in enumerate(self.state):
+            self.window.addstr(15 + y, 0, str(row))
+            for x, val in enumerate(row):
+                if val == 1:
+                    self.draw_x(y, x)
+                if val == 10:
+                    self.draw_o(y, x)
+
+        self.window.refresh()
 
     def draw_board(self):
         for y in xrange(1, 12):
@@ -27,30 +71,15 @@ class Game(object):
             for x in (3, 7):
                 self.window.addch(y, x, ch)
 
-    def display_state(self):
-        """Redraw everything good for staring a game
-        """
-
-        self.draw_board()
-
-        for y, row in enumerate(self.state):
-            for x, col in enumerate(row):
-                if col == 1:
-                    self.draw_x(y, x)
-                if col == 10:
-                    self.draw_o(y, x)
-
-        self.window.refresh()
+    def draw_o(self, y, x):
+        y_loc = (y * 4) + 2
+        x_loc = (x * 4) + 1
+        self.window.addstr(y_loc, x_loc, 'O')
 
     def draw_x(self, y, x):
         y_loc = (y * 4) + 2
-        x_loc = (y * 4) + 1
+        x_loc = (x * 4) + 1
         self.window.addstr(y_loc, x_loc, 'X')
-
-    def draw_o(self, y, x):
-        y_loc = (y * 4) + 2
-        x_loc = (y * 4) + 1
-        self.window.addstr(y_loc, x_loc, 'O')
 
     def key_prompt(self, prompt):
         self.show_message(prompt)
@@ -61,14 +90,18 @@ class Game(object):
         return ch
 
     def show_message(self, msg):
+        self.window.erase()
+        self.display_state()
         self.window.addstr(13, 0, msg)
 
 
-class PerfectPlayer(object):
-    def __init__(self, play_first=True):
-        self.play_first = play_first
+class Player(object):
+    def __init__(self, game):
+        self.game = game
 
-    def play(self, game):
+
+class PerfectPlayer(Player):
+    def play(self):
         pass
         # Win
         # Block wins
@@ -78,6 +111,16 @@ class PerfectPlayer(object):
         # opposite corner
         # any corner
         # side
+
+
+class RandomPlayer(Player):
+    def play(self):
+        """Find random open location, and play there"""
+        open_list = [(y, x) for y, row in enumerate(self.game) for x, val in enumerate(row) if val == 0]
+        if not open_list:
+            self.game.show_message('The board is full')
+            return
+        self.game.play(*random.choice(open_list))
 
 
 def main(stdscr):
@@ -94,12 +137,18 @@ def main(stdscr):
 
     if user_first:
         game.show_message('Ok, choose your square')
+        # TODO get move
     else:
         game.show_message("Ok, I'll go first")
 
     stdscr.getch()
 
-    #cpu = PerfectPlayer(play_first=not user_first)
+    cpu = RandomPlayer(game)
+
+    for t in xrange(10):
+        cpu.play()
+        game.show_message("Next?")
+        stdscr.getch()
 
 
 if __name__ == '__main__':
