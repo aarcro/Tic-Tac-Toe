@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 
+from collections import Iterator, defaultdict
+import argparse
 import curses
 import random
-from collections import Iterator, defaultdict
 
 
 LEFT_DIAGONAL = ((0, 0), (1, 1), (2, 2))
@@ -149,7 +150,8 @@ class Game(object):
         self.draw_board()
 
         for y, row in enumerate(self.rows):
-            self.window.addstr(15 + y, 0, str(row))
+            if self.DEBUG:
+                self.window.addstr(15 + y, 0, str(row))
             for x, val in enumerate(row):
                 if val == 1:
                     self.draw_x(y, x)
@@ -165,23 +167,23 @@ class Game(object):
                 ch = curses.ACS_PLUS
 
                 for x in xrange(11):
-                    self.window.addch(y, x, curses.ACS_HLINE)
+                    self.window.addch(y, x, curses.ACS_HLINE, curses.color_pair(6))
             else:
                 ch = curses.ACS_VLINE
 
             for x in (3, 7):
-                self.window.addch(y, x, ch)
+                self.window.addch(y, x, ch, curses.color_pair(6))
 
-    def draw_chr(self, y, x, char):
+    def draw_chr(self, y, x, char, *args):
         y_loc = (y * 4) + 2
         x_loc = (x * 4) + 1
-        self.window.addstr(y_loc, x_loc, char)
+        self.window.addstr(y_loc, x_loc, char, *args)
 
     def draw_o(self, y, x):
-        self.draw_chr(y, x, 'O')
+        self.draw_chr(y, x, 'O', curses.color_pair(3))
 
     def draw_x(self, y, x):
-        self.draw_chr(y, x, 'X')
+        self.draw_chr(y, x, 'X', curses.color_pair(2))
 
     def debug(self, msg):
         if self.DEBUG:
@@ -290,13 +292,14 @@ class SmartPlayer(RandomPlayer):
 
 
 class PerfectPlayer(SmartPlayer):
+    """Logic based on http://en.wikipedia.org/wiki/Tic_tac_toe#Strategy
+    and http://www.wikihow.com/Win-at-Tic-Tac-Toe"""
+
     def __init__(self, *args, **kwargs):
         super(PerfectPlayer, self).__init__(*args, **kwargs)
         self.first_turn = True
 
     def _first_play(self):
-        """Logic based on http://en.wikipedia.org/wiki/Tic_tac_toe#Strategy"""
-
         game = self.game
         self.first_turn = False
 
@@ -306,10 +309,10 @@ class PerfectPlayer(SmartPlayer):
             return game.play(*random.choice(CORNERS))
         else:
             # I'm O
-            # Side if Center
+            # Corner if Center
             if game.rows[1][1]:
-                game.debug('Side to Counter Center')
-                return game.play(*random.choice(SIDES))
+                game.debug('Corner to Counter Center')
+                return game.play(*random.choice(CORNERS))
             # Center if Corner
             if 1 in [val for val, loc in game.corners]:
                 game.debug('Center to Counter Corner')
@@ -346,6 +349,14 @@ class PerfectPlayer(SmartPlayer):
         x_spaces = defaultdict(int)
         o_spaces = defaultdict(int)
 
+        # If I have Center, play a side
+        if game.rows[1][1] == game.current_turn:
+            moves = [loc for val, loc in game.sides if val == 0]
+            if moves:
+                move = random.choice(moves)
+                game.debug('My center, play side {}'.format(move))
+                return game.play(*move)
+
         # Find lines with two open spaces
         for values, spaces in game:
             s = sum(values)
@@ -378,6 +389,7 @@ class PerfectPlayer(SmartPlayer):
                 game.debug('Fork or block Fork at {}'.format(move))
                 return game.play(*move)
 
+
         # Center
         if game.rows[1][1] == 0:
             game.debug('Take Center')
@@ -386,7 +398,7 @@ class PerfectPlayer(SmartPlayer):
         # opposite corner
         for val, loc in game.corners:
             y, x = loc
-            if val == game.current_turn:
+            if val == game.next_turn:
                 try:
                     move = (flip_loc(y), flip_loc(x))
                     game.debug('try opposite corner at {}'.format(move))
@@ -419,10 +431,16 @@ class PerfectPlayer(SmartPlayer):
         return self._play()
 
 
-def main(stdscr):
+def main(stdscr, **kwargs):
+    curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+    curses.init_pair(3, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+    curses.init_pair(6, curses.COLOR_CYAN, curses.COLOR_BLACK)
+
     PLAYERS = [RandomPlayer, SmartPlayer, PerfectPlayer]
+    solo = kwargs['solo']
+
     while 1:
-        game = Game(stdscr, debug=True)
+        game = Game(stdscr, debug=kwargs['debug'])
         game.display_state()
 
         level = None
@@ -436,36 +454,52 @@ def main(stdscr):
         # Clear message
         game.display_state()
 
-        user_first = None
-        while user_first is None:
-            user_first = game.key_prompt('Would you like to play first (y/n)? ')
-            if user_first not in 'yn':
-                user_first = None
+        if not solo:
+            user_first = None
+            while user_first is None:
+                user_first = game.key_prompt('Would you like to play first (y/n)? ')
+                if user_first not in 'yn':
+                    user_first = None
 
-        # Clear message
-        game.display_state()
+            # Clear message
+            game.display_state()
 
-        user_first = user_first == 'y'
+            user_first = user_first == 'y'
 
-        if user_first:
-            # Can't win on the first move, so don't check
-            game.get_interactive_move()
-        else:
-            game.show_message("Ok, I'll go first")
-            stdscr.getch()
-
+            if user_first:
+                # Can't win on the first move, so don't check
+                game.get_interactive_move()
+            else:
+                game.show_message("Ok, I'll go first")
+                stdscr.getch()
 
         cpu = PLAYERS[level](game)
+        if solo:
+            cpu2 = PLAYERS[level](game)
+
+        def cpu_end_game(game):
+            if game.won:
+                if solo:
+                    if game.current_turn == 1:
+                        game.key_prompt("X wins !!!!")
+                    else:
+                        game.key_prompt("O wins !!!!")
+                else:
+                    game.key_prompt("I win !!!!")
+            else:
+                game.key_prompt("Draw")
 
         for t in xrange(9):
             if cpu.play():
-                if game.won:
-                    game.key_prompt("I win !!!!")
-                else:
-                    game.key_prompt("Draw")
+                cpu_end_game(game)
                 break
 
-            if game.get_interactive_move():
+
+            if solo and cpu2.play():
+                cpu_end_game(game)
+                break
+
+            if not solo and game.get_interactive_move():
                 if game.won:
                     game.key_prompt("You win !!!!")
                 else:
@@ -483,4 +517,22 @@ def main(stdscr):
 
 
 if __name__ == '__main__':
-    curses.wrapper(main)
+    parser = argparse.ArgumentParser(description='Interactivly play tictactoe.')
+    parser.add_argument(
+        '-d', '--debug',
+        dest='debug',
+        action='store_true',
+        default=False,
+        help='Display game internal state and CPU descisions'
+    )
+
+    parser.add_argument(
+        '-s', '--solo',
+        dest='solo',
+        action='store_true',
+        default=False,
+        help='Run with two CPU players'
+    )
+
+    args = parser.parse_args()
+    curses.wrapper(main, **vars(args))
