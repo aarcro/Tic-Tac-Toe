@@ -2,15 +2,22 @@
 
 import curses
 import random
-from collections import Iterator
+from collections import Iterator, defaultdict
 
 
 LEFT_DIAGONAL = ((0, 0), (1, 1), (2, 2))
 RIGHT_DIAGONAL = ((0, 2), (1, 1), (2, 0))
+CORNERS = ((0,0), (0, 2), (2, 0), (2, 2))
+SIDES = ((0,1), (1, 0), (1, 2), (2, 1))
+CENTER = (1,1)
 
 class SpaceOccupied(Exception):
     pass
 
+
+def flip_loc(val):
+    """Switches 0 to 2 and vice versa"""
+    return (val + 2) % 4
 
 class TurnAlternator(Iterator):
     """Generate values from a list, repeating forever.
@@ -78,7 +85,6 @@ class Game(object):
                 # Available move exists
                 self.current_turn = self.turns.next()
                 return False
-
         #Draw
         return True
 
@@ -115,6 +121,20 @@ class Game(object):
         return result
 
     @property
+    def corners(self):
+        """Generate corner (value, location) tuples"""
+
+        for y, x in CORNERS:
+            yield self.rows[y][x], (y,x)
+
+    @property
+    def sides(self):
+        """Generate side (value, location) tuples"""
+
+        for y, x in SIDES:
+            yield self.rows[y][x], (y,x)
+
+    @property
     def left_diagonal(self):
         return [self.rows[y][x] for y,x in LEFT_DIAGONAL]
 
@@ -123,8 +143,7 @@ class Game(object):
         return [self.rows[y][x] for y,x in RIGHT_DIAGONAL]
 
     def display_state(self):
-        """Redraw everything good for staring a game
-        """
+        """Clear and Redraw everything"""
 
         self.window.erase()
         self.draw_board()
@@ -271,78 +290,196 @@ class SmartPlayer(RandomPlayer):
 
 
 class PerfectPlayer(SmartPlayer):
+    def __init__(self, *args, **kwargs):
+        super(PerfectPlayer, self).__init__(*args, **kwargs)
+        self.first_turn = True
+
+    def _first_play(self):
+        """Logic based on http://en.wikipedia.org/wiki/Tic_tac_toe#Strategy"""
+
+        game = self.game
+        self.first_turn = False
+
+        if game.current_turn == 1:
+            # I'm X - play a corner
+            game.debug('First play corner')
+            return game.play(*random.choice(CORNERS))
+        else:
+            # I'm O
+            # Side if Center
+            if game.rows[1][1]:
+                game.debug('Side to Counter Center')
+                return game.play(*random.choice(SIDES))
+            # Center if Corner
+            if 1 in [val for val, loc in game.corners]:
+                game.debug('Center to Counter Corner')
+                return game.play(*CENTER)
+
+            # Must be side - find it
+            for val, loc in game.sides:
+                if val:
+                    break
+            y, x = loc
+            locations = [(1,1)]
+
+            if y == 1:
+                #Center row
+                locations.append((0, x))
+                locations.append((2, x))
+                locations.append((1, flip_loc(x)))
+            else:
+                #Center Column
+                locations.append((y, 0))
+                locations.append((y, 2))
+                locations.append((flip_loc(y), 1))
+
+            game.debug('Center, Touching corner, or Opposite side')
+            return game.play(*random.choice(locations))
+
     def _play(self):
-        pass
-        # Fork
-        # Block fork
+        if self.first_turn:
+            return self._first_play()
+
+        game = self.game
+
+        # Dictionary, of (y, x) to occurances
+        x_spaces = defaultdict(int)
+        o_spaces = defaultdict(int)
+
+        # Find lines with two open spaces
+        for values, spaces in game:
+            s = sum(values)
+            if s not in (1, 10):
+                continue
+            # Make sure spaces is mutable (Diagonals aren't)
+            spaces = list(spaces)
+            # Remove occupied
+            del spaces[values.index(s)]
+            if s == 1:
+                use = x_spaces
+            if s == 10:
+                use = o_spaces
+
+            for space in spaces:
+                use[space] += 1
+
+        # Try to fork, then to block
+        if game.current_turn == 1:
+            trial = x_spaces, o_spaces
+        else:
+            trial = o_spaces, x_spaces
+
+        for spaces in trial:
+            # good val is usually 2
+            # 3 is possible if the center is open after 5 turns
+            moves = [loc for loc, val in spaces.items() if val > 1]
+            if moves:
+                move = random.choice(moves)
+                game.debug('Fork or block Fork at {}'.format(move))
+                return game.play(*move)
+
         # Center
+        if game.rows[1][1] == 0:
+            game.debug('Take Center')
+            return game.play(1, 1)
+
         # opposite corner
+        for val, loc in game.corners:
+            y, x = loc
+            if val == game.current_turn:
+                try:
+                    move = (flip_loc(y), flip_loc(x))
+                    game.debug('try opposite corner at {}'.format(move))
+                    return game.play(*move)
+                except SpaceOccupied:
+                    game.debug('Missed it')
+
         # any corner
-        # side
+        moves = [loc for val, loc in game.corners if val == 0]
+        if moves:
+            move = random.choice(moves)
+            game.debug('Any corner at {}'.format(move))
+            return game.play(*move)
+
+        # side -- If we got this far, there must be one open
+        moves = [loc for val, loc in game.sides if val == 0]
+        move = random.choice(moves)
+        game.debug('Any side at {}'.format(move))
+        return game.play(*move)
+
 
     def play(self):
+        # Let smart handle Win/Block
         result = super(PerfectPlayer, self)._play()
 
         if result is not None:
             #Move made, return it
             return result
 
-        result = self._play()
+        return self._play()
 
 
 def main(stdscr):
     PLAYERS = [RandomPlayer, SmartPlayer, PerfectPlayer]
-    game = Game(stdscr, debug=True)
-    game.display_state()
+    while 1:
+        game = Game(stdscr, debug=True)
+        game.display_state()
 
-    level = None
-    while level is None:
-        level = game.key_prompt('What difficulty would you like (1: Easy, 2: Smart, 3: Imposible) ')
-        if level not in '123':
-            level = None
+        level = None
+        while level is None:
+            level = game.key_prompt('What difficulty would you like (1: Easy, 2: Smart, 3: Imposible) ')
+            if level not in '123':
+                level = None
 
-    level = int(level) - 1
+        level = int(level) - 1
 
-    # Clear message
-    game.display_state()
+        # Clear message
+        game.display_state()
 
-    user_first = None
-    while user_first is None:
-        user_first = game.key_prompt('Would you like to play first (y/n)? ')
-        if user_first not in 'yn':
-            user_first = None
+        user_first = None
+        while user_first is None:
+            user_first = game.key_prompt('Would you like to play first (y/n)? ')
+            if user_first not in 'yn':
+                user_first = None
 
-    # Clear message
-    game.display_state()
+        # Clear message
+        game.display_state()
 
-    user_first = user_first == 'y'
+        user_first = user_first == 'y'
 
-    if user_first:
-        # Can't win on the first move, so don't check
-        game.get_interactive_move()
-    else:
-        game.show_message("Ok, I'll go first")
-        stdscr.getch()
+        if user_first:
+            # Can't win on the first move, so don't check
+            game.get_interactive_move()
+        else:
+            game.show_message("Ok, I'll go first")
+            stdscr.getch()
 
 
-    cpu = PLAYERS[level](game)
+        cpu = PLAYERS[level](game)
 
-    for t in xrange(9):
-        if cpu.play():
-            if game.won:
-                game.show_message("I win !!!!")
-            else:
-                game.show_message("Draw")
+        for t in xrange(9):
+            if cpu.play():
+                if game.won:
+                    game.key_prompt("I win !!!!")
+                else:
+                    game.key_prompt("Draw")
+                break
+
+            if game.get_interactive_move():
+                if game.won:
+                    game.key_prompt("You win !!!!")
+                else:
+                    game.key_prompt("Draw")
+                break
+
+        again = None
+        while again is None:
+            again = game.key_prompt('Would you like to play again (y/n)? ')
+            if again not in 'yn':
+                again = None
+
+        if again == 'n':
             break
-
-        if game.get_interactive_move():
-            if game.won:
-                game.show_message("You win !!!!")
-            else:
-                game.show_message("Draw")
-            break
-
-    stdscr.getch()
 
 
 if __name__ == '__main__':
