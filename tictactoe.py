@@ -37,6 +37,8 @@ class Game(object):
         else:
             raise SpaceOccupied()
 
+        self.display_state()
+
         # Check Lines
         for line in self.lines:
             # Only the current player can win
@@ -44,7 +46,6 @@ class Game(object):
                 return True
 
         self.current_turn = self.turns.next()
-        self.display_state()
         return False
 
     @property
@@ -81,6 +82,7 @@ class Game(object):
         """Redraw everything good for staring a game
         """
 
+        self.window.erase()
         self.draw_board()
 
         for y, row in enumerate(self.rows):
@@ -107,28 +109,49 @@ class Game(object):
             for x in (3, 7):
                 self.window.addch(y, x, ch)
 
-    def draw_o(self, y, x):
+    def draw_chr(self, y, x, char):
         y_loc = (y * 4) + 2
         x_loc = (x * 4) + 1
-        self.window.addstr(y_loc, x_loc, 'O')
+        self.window.addstr(y_loc, x_loc, char)
+
+    def draw_o(self, y, x):
+        self.draw_chr(y, x, 'O')
 
     def draw_x(self, y, x):
-        y_loc = (y * 4) + 2
-        x_loc = (x * 4) + 1
-        self.window.addstr(y_loc, x_loc, 'X')
+        self.draw_chr(y, x, 'X')
 
     def key_prompt(self, prompt):
         self.show_message(prompt)
         ch = self.window.getkey()
-        self.window.erase()
-        self.display_state()
-
+        self.show_message(' ' * len(prompt))
         return ch
 
     def show_message(self, msg):
+        self.window.addstr(13, 0, msg)
+
+    def get_interactive_move(self):
+        #Show numbers
         self.window.erase()
         self.display_state()
-        self.window.addstr(13, 0, msg)
+        self.window.attron(curses.A_BOLD)
+        valid = {}
+        nums = (str(n) for n in xrange(1, 10))
+        for y in xrange(3):
+            for x in xrange(3):
+                num = nums.next()
+                if self.rows[y][x] == 0:
+                    # No value, display as choice
+                    self.draw_chr(y, x, num)
+                    valid[num] = (y, x)
+        self.window.attroff(curses.A_BOLD)
+        self.window.refresh()
+
+        choice = None
+        while choice is None:
+            choice = self.key_prompt('Your move? ')
+            if choice not in valid:
+                choice = None
+        return self.play(*valid[choice])
 
 
 class Player(object):
@@ -152,8 +175,13 @@ class PerfectPlayer(Player):
 class RandomPlayer(Player):
     def play(self):
         """Find random open location, and play there"""
+        # Don't need output, just a press to continue
+        self.game.display_state()
+        self.game.key_prompt('Ready?')
+
         open_list = [(y, x) for y, row in enumerate(self.game) for x, val in enumerate(row) if val == 0]
         if not open_list:
+            self.display_state()
             self.game.show_message('The board is full')
             return
         return self.game.play(*random.choice(open_list))
@@ -169,28 +197,27 @@ def main(stdscr):
         if user_first not in 'yn':
             user_first = None
 
+    game.display_state()
+
     user_first = user_first == 'y'
 
     if user_first:
-        game.show_message('Ok, choose your square')
-        # TODO get move
+        # Can't win on the first move, so don't check
+        game.get_interactive_move()
     else:
         game.show_message("Ok, I'll go first")
-
-    stdscr.getch()
+        stdscr.getch()
 
     cpu = RandomPlayer(game)
 
     for t in xrange(9):
         if cpu.play():
-            if game.current_turn == 1:
-                game.show_message("X wins")
-            else:
-                game.show_message("O wins")
+            game.show_message("I win !!!!")
             break
 
-        game.show_message("Next?")
-        stdscr.getch()
+        if game.get_interactive_move():
+            game.show_message("You win !!!!")
+            break
 
     stdscr.getch()
 
