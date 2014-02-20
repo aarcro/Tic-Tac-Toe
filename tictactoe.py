@@ -383,10 +383,10 @@ class PerfectPlayer(SmartPlayer):
         for spaces in trial:
             # good val is usually 2
             # 3 is possible if the center is open after 5 turns
-            moves = [loc for loc, val in spaces.items() if val > 1]
+            moves = [loc for loc, val in spaces.items() if val > 1 and loc in CORNERS]
             if moves:
                 move = random.choice(moves)
-                game.debug('Fork or block Fork at {}'.format(move))
+                game.debug('Fork or block Fork at {} from moves: {}'.format(move, moves))
                 return game.play(*move)
 
 
